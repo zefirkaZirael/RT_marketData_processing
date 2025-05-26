@@ -1,4 +1,4 @@
-# Real-time-cryptocurrency-market-data-processing-system-built-with-Go-PostgreSQL-and-Redis.
+# Application for real-time aggregation and processing of market data
 Real-time cryptocurrency market data processing system built with Go, PostgreSQL, and Redis.
 
 ### This project simulates a backend for financial systems that:
