@@ -1,0 +1,4 @@
+.env
+config/.env
+docker-compose.yml
+todo.md
