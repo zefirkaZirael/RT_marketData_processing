@@ -1,0 +1,69 @@
+version: "3.8"
+
+services:
+  redis:
+    image: redis:7
+    container_name: MarketFlowCache
+    env_file:
+      - user_friendly.env
+    ports:
+      - "${CACHE_PORT}:6379"
+    command: ["redis-server", "--requirepass", "${CACHE_PASSWORD}"]
+    environment:
+      REDIS_HOST: ${CACHE_HOST}
+      REDIS_PORT: ${CACHE_PORT}
+      REDIS_PASSWORD: ${CACHE_PASSWORD}
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${CACHE_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+
+  db:
+    image: postgres:15
+    container_name: MarketFlowDB
+    env_file:
+      - user_friendly.env
+    ports:
+      - "${DB_PORT}:5432"
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - ./scripts:/docker-entrypoint-initdb.d
+
+#   app:
+#     build:
+#       context: .
+#     ports:
+#       - "8080:8080"
+#     depends_on:
+#       redis:
+#         condition: service_healthy
+#       db:
+#         condition: service_healthy
+
+  exchange1:
+    image: exchange1:latest
+    container_name: exchange1
+    ports:
+      - "40101:40101"
+
+  exchange2:
+    image: exchange2:latest
+    container_name: exchange2
+    ports:
+      - "40102:40102"
+
+  exchange3:
+    image: exchange3:latest
+    container_name: exchange3
+    ports:
+      - "40103:40103"
