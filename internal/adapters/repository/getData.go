@@ -1,44 +1,58 @@
 package repository
 
 import (
-	"database/sql"
-	"fmt"
 	"marketflow/internal/domain"
+	"time"
 )
 
-func (repo *PostgresDatabase) GetLatestData(exchange, symbol string) (domain.Data, error) {
-	var (
-		query string
-		rows  *sql.Rows
-		err   error
-	)
-
-	if exchange == "All" {
-		query = `
-			SELECT Exchange, Pair_name, Price, StoredTime
-			FROM LatestData
-			WHERE Pair_name = $1
-			ORDER BY StoredTime DESC
-			LIMIT 1;
-		`
-		rows, err = repo.Db.Query(query, symbol)
-	} else {
-		query = `
-			SELECT Exchange, Pair_name, Price, StoredTime
-			FROM LatestData
-			WHERE Exchange = $1 AND Pair_name = $2
-			ORDER BY StoredTime DESC
-			LIMIT 1;
-		`
-		rows, err = repo.Db.Query(query, exchange, symbol)
+// Gets the latest price data by exchange for specific symbol
+func (repo *PostgresDatabase) GetLatestDataByExchange(exchange, symbol string) (domain.Data, error) {
+	data := domain.Data{
+		ExchangeName: exchange,
+		Symbol:       symbol,
 	}
+
+	rows, err := repo.Db.Query(`
+		SELECT Exchange, Pair_name, Price, StoredTime
+			FROM LatestData
+		WHERE Exchange = $1 AND Pair_name = $2
+		ORDER BY StoredTime DESC
+		LIMIT 1;
+		`, exchange, symbol)
 
 	if err != nil {
 		return domain.Data{}, err
 	}
 	defer rows.Close()
 
-	var data domain.Data
+	if rows.Next() {
+		if err := rows.Scan(&data.ExchangeName, &data.Symbol, &data.Price, &data.Timestamp); err != nil {
+			return domain.Data{}, err
+		}
+
+		return data, nil
+	}
+
+	return domain.Data{}, nil
+}
+func (repo *PostgresDatabase) GetLatestDataByAllExchanges(symbol string) (domain.Data, error) {
+	data := domain.Data{
+		ExchangeName: "All",
+		Symbol:       symbol,
+	}
+
+	rows, err := repo.Db.Query(`
+		SELECT Exchange, Pair_name, Price, StoredTime
+		FROM LatestData
+		WHERE Pair_name = $1
+		ORDER BY StoredTime DESC
+		LIMIT 1;
+	`, symbol)
+	if err != nil {
+		return domain.Data{}, err
+	}
+	defer rows.Close()
+
 	if rows.Next() {
 		if err := rows.Scan(&data.ExchangeName, &data.Symbol, &data.Price, &data.Timestamp); err != nil {
 			return domain.Data{}, err
@@ -49,83 +63,373 @@ func (repo *PostgresDatabase) GetLatestData(exchange, symbol string) (domain.Dat
 	return domain.Data{}, nil
 }
 
-func (repo *PostgresDatabase) GetExtremePrice(op, exchange, symbol string, period int) (domain.Data, error) {
-	var (
-		query string
-		rows  *sql.Rows
-		err   error
-	)
-
-	if exchange == "All" {
-		query = fmt.Sprintf(`
-			SELECT Exchange, Pair_name, %s(Price), MAX(StoredTime)
-			FROM LatestData
-			WHERE Pair_name = $1 AND StoredTime >= NOW() - INTERVAL '%d seconds'
-			GROUP BY Exchange, Pair_name
-			ORDER BY %s(Price) DESC
-			LIMIT 1;
-		`, op, period, op)
-		rows, err = repo.Db.Query(query, symbol)
-	} else {
-		query = fmt.Sprintf(`
-			SELECT Exchange, Pair_name, %s(Price), MAX(StoredTime)
-			FROM LatestData
-			WHERE Exchange = $1 AND Pair_name = $2 AND StoredTime >= NOW() - INTERVAL '%d seconds'
-			GROUP BY Exchange, Pair_name
-			LIMIT 1;
-		`, op, period)
-		rows, err = repo.Db.Query(query, exchange, symbol)
+// Gets the average price data by exchange over all period
+func (repo *PostgresDatabase) GetAveragePriceByExchange(exchange, symbol string) (domain.Data, error) {
+	data := domain.Data{
+		ExchangeName: exchange,
+		Symbol:       symbol,
 	}
 
+	rows, err := repo.Db.Query(`
+	SELECT COALESCE(AVG(Average_price), 0) FROM AggregatedData
+	WHERE Exchange = $1 AND Pair_name = $2
+	`, exchange, symbol)
 	if err != nil {
 		return domain.Data{}, err
 	}
 	defer rows.Close()
 
-	var data domain.Data
-	if rows.Next() {
-		if err := rows.Scan(&data.ExchangeName, &data.Symbol, &data.Price, &data.Timestamp); err != nil {
+	for rows.Next() {
+		if err := rows.Scan(&data.Price); err != nil {
 			return domain.Data{}, err
 		}
-		return data, nil
 	}
 
-	return domain.Data{}, nil
+	return data, nil
 }
 
-func (repo *PostgresDatabase) GetAveragePrice(exchange, symbol string, period int) (domain.Data, error) {
-	var (
-		query string
-		row   *sql.Row
-	)
-
-	if exchange == "All" {
-		query = `
-			SELECT 'All', Pair_name, AVG(Price), MAX(StoredTime)		
-			FROM LatestData
-			WHERE Pair_name = $1 AND StoredTime >= NOW() - INTERVAL '%d seconds'
-			GROUP BY Pair_name
-			LIMIT 1;
-		`
-		query = fmt.Sprintf(query, period)
-		row = repo.Db.QueryRow(query, symbol)
-	} else {
-		query = `
-			SELECT Exchange, Pair_name, AVG(Price), MAX(StoredTime)
-			FROM LatestData
-			WHERE Exchange = $1 AND Pair_name = $2 AND StoredTime >= NOW() - INTERVAL '%d seconds'
-			GROUP BY Exchange, Pair_name
-			LIMIT 1;
-		`
-		query = fmt.Sprintf(query, period)
-		row = repo.Db.QueryRow(query, exchange, symbol)
+// Gets the average price by exchange over all period
+func (repo *PostgresDatabase) GetAveragePriceByAllExchanges(symbol string) (domain.Data, error) {
+	data := domain.Data{
+		ExchangeName: "All",
+		Symbol:       symbol,
 	}
 
-	var data domain.Data
-	err := row.Scan(&data.ExchangeName, &data.Symbol, &data.Price, &data.Timestamp)
+	rows, err := repo.Db.Query(`
+	SELECT COALESCE(AVG(Average_price), 0) from AggregatedData
+	WHERE Pair_name = $1 AND Exchange = 'All'
+	`, symbol)
 	if err != nil {
 		return domain.Data{}, err
 	}
+	defer rows.Close()
 
+	for rows.Next() {
+		if err := rows.Scan(&data.Price); err != nil {
+			return domain.Data{}, err
+		}
+	}
+
+	return data, nil
+}
+
+// Gets the average price within the last {duration}
+func (repo *PostgresDatabase) GetAveragePriceWithDuration(exchange, symbol string, startTime time.Time, duration time.Duration) (domain.Data, error) {
+	data := domain.Data{
+		ExchangeName: exchange,
+		Symbol:       symbol,
+	}
+
+	rows, err := repo.Db.Query(`
+	SELECT COALESCE(AVG(Average_price), 0) FROM AggregatedData
+	WHERE Exchange = $1 AND Pair_name = $2 AND StoredTime BETWEEN $3 and $4
+	`, exchange, symbol, startTime.Add(-duration), startTime)
+	if err != nil {
+		return domain.Data{}, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		if err := rows.Scan(&data.Price); err != nil {
+			return domain.Data{}, err
+		}
+	}
+
+	return data, nil
+}
+
+// Min by all exchange and all time
+func (repo *PostgresDatabase) GetMinPriceByAllExchanges(symbol string) (domain.Data, error) {
+	data := domain.Data{
+		ExchangeName: "All",
+		Symbol:       symbol,
+	}
+
+	rows, err := repo.Db.Query(`
+SELECT Pair_name, exchange, StoredTime, Min_price
+FROM AggregatedData
+WHERE 
+    Pair_name = $1  AND exchange = 'All'
+    AND Min_price = (
+        SELECT MIN(Min_price)
+        FROM AggregatedData
+        WHERE 
+            Pair_name = $1
+            AND exchange = 'All'
+    );
+	`, symbol)
+	if err != nil {
+		return domain.Data{}, err
+	}
+	defer rows.Close()
+
+	var t time.Time
+	for rows.Next() {
+		if err := rows.Scan(&data.Symbol, &data.ExchangeName, &t, &data.Price); err != nil {
+			return domain.Data{}, err
+		}
+	}
+	data.Timestamp = t.UnixMilli()
+
+	return data, nil
+}
+
+// Min by one exchange and all time
+func (repo *PostgresDatabase) GetMinPriceByExchange(exchange, symbol string) (domain.Data, error) {
+	data := domain.Data{
+		ExchangeName: exchange,
+		Symbol:       symbol,
+	}
+
+	rows, err := repo.Db.Query(`
+SELECT Pair_name, exchange, StoredTime, Min_price
+FROM AggregatedData
+WHERE 
+    Pair_name = $1  AND exchange = $2
+    AND Min_price = (
+        SELECT MIN(Min_price)
+        FROM AggregatedData
+        WHERE 
+            Pair_name = $1
+            AND exchange = $2
+    );
+	`, exchange, symbol)
+	if err != nil {
+		return domain.Data{}, err
+	}
+	defer rows.Close()
+
+	var t time.Time
+	for rows.Next() {
+		if err := rows.Scan(&data.Symbol, &data.ExchangeName, &t, &data.Price); err != nil {
+			return domain.Data{}, err
+		}
+	}
+	data.Timestamp = t.UnixMilli()
+
+	return data, nil
+}
+
+// Min by one exchange on period
+func (repo *PostgresDatabase) GetMinPriceByExchangeWithDuration(exchange, symbol string, startTime time.Time, duration time.Duration) (domain.Data, error) {
+	data := domain.Data{
+		ExchangeName: exchange,
+		Symbol:       symbol,
+	}
+
+	rows, err := repo.Db.Query(`
+SELECT Pair_name, exchange, StoredTime, Min_price
+FROM AggregatedData
+WHERE 
+    Pair_name = $1  AND exchange =  $2 AND StoredTime BETWEEN $3 AND $4
+    AND Min_price = (
+        SELECT MIN(Min_price)
+        FROM AggregatedData
+        WHERE 
+            Pair_name = $1
+            AND exchange = $2
+            AND StoredTime BETWEEN $3 AND $4
+    );
+	`, symbol, exchange, startTime.Add(-duration), startTime)
+	if err != nil {
+		return domain.Data{}, err
+	}
+	defer rows.Close()
+
+	var t time.Time
+	for rows.Next() {
+		if err := rows.Scan(&data.Symbol, &data.ExchangeName, &t, &data.Price); err != nil {
+			return domain.Data{}, err
+		}
+	}
+
+	data.Timestamp = t.UnixMilli()
+
+	return data, nil
+}
+
+// Min by one exchange on period
+func (repo *PostgresDatabase) GetMinPriceByAllExchangesWithDuration(symbol string, startTime time.Time, duration time.Duration) (domain.Data, error) {
+	data := domain.Data{
+		ExchangeName: "All",
+		Symbol:       symbol,
+	}
+
+	rows, err := repo.Db.Query(`
+SELECT Pair_name, exchange, StoredTime, Min_price
+FROM AggregatedData
+WHERE 
+    Pair_name = $1  AND exchange = 'All' AND StoredTime BETWEEN $2 AND $3
+    AND Min_price = (
+        SELECT MIN(Min_price)
+        FROM AggregatedData
+        WHERE 
+            Pair_name = $1
+            AND exchange = 'All'
+            AND StoredTime BETWEEN $2 AND $3
+    );
+	`, symbol, startTime.Add(-duration), startTime)
+	if err != nil {
+		return domain.Data{}, err
+	}
+	defer rows.Close()
+
+	var t time.Time
+	for rows.Next() {
+		if err := rows.Scan(&data.Symbol, &data.ExchangeName, &t, &data.Price); err != nil {
+			return domain.Data{}, err
+		}
+	}
+	data.Timestamp = t.UnixMilli()
+
+	return data, nil
+}
+
+// Max by all exchange all time
+func (repo *PostgresDatabase) GetMaxPriceByAllExchanges(symbol string) (domain.Data, error) {
+	data := domain.Data{
+		ExchangeName: "All",
+		Symbol:       symbol,
+	}
+
+	rows, err := repo.Db.Query(`
+SELECT Pair_name, exchange, StoredTime, Max_price
+FROM AggregatedData
+WHERE 
+    Pair_name = $1  AND exchange = 'All'
+    AND Max_price = (
+        SELECT MAX(Max_price)
+        FROM AggregatedData
+        WHERE 
+            Pair_name = $1
+            AND exchange = 'All'
+    );
+
+	`, symbol)
+	if err != nil {
+		return domain.Data{}, err
+	}
+	defer rows.Close()
+
+	var t time.Time
+	for rows.Next() {
+		if err := rows.Scan(&data.Symbol, &data.ExchangeName, &t, &data.Price); err != nil {
+			return domain.Data{}, err
+		}
+	}
+	data.Timestamp = t.UnixMilli()
+
+	return data, nil
+}
+
+// Max by one exchange on all time
+func (repo *PostgresDatabase) GetMaxPriceByExchange(exchange, symbol string) (domain.Data, error) {
+	data := domain.Data{
+		ExchangeName: exchange,
+		Symbol:       symbol,
+	}
+
+	rows, err := repo.Db.Query(`
+SELECT Pair_name, exchange, StoredTime, Max_price
+FROM AggregatedData
+WHERE 
+    Pair_name = $1  AND exchange = $2
+    AND Max_price = (
+        SELECT MAX(Max_price)
+        FROM AggregatedData
+        WHERE 
+            Pair_name = $1
+            AND exchange = $2
+    );
+	`, symbol, exchange)
+	if err != nil {
+		return domain.Data{}, err
+	}
+	defer rows.Close()
+
+	var t time.Time
+	for rows.Next() {
+		if err := rows.Scan(&data.Symbol, &data.ExchangeName, &t, &data.Price); err != nil {
+			return domain.Data{}, err
+		}
+	}
+	data.Timestamp = t.UnixMilli()
+
+	return data, nil
+}
+
+// Max by one exchange on period
+func (repo *PostgresDatabase) GetMaxPriceByExchangeWithDuration(exchange, symbol string, startTime time.Time, duration time.Duration) (domain.Data, error) {
+	data := domain.Data{
+		ExchangeName: exchange,
+		Symbol:       symbol,
+	}
+
+	rows, err := repo.Db.Query(`
+SELECT Pair_name, exchange, StoredTime, Max_price
+FROM AggregatedData
+WHERE 
+    Pair_name = $1  AND exchange = $2 AND StoredTime BETWEEN $3 AND $4
+    AND Max_price = (
+        SELECT MAX(Max_price)
+        FROM AggregatedData
+        WHERE 
+            Pair_name = $1
+            AND exchange = $2
+            AND StoredTime BETWEEN $3 AND $4
+    );
+	`, symbol, exchange, startTime.Add(-duration), startTime)
+	if err != nil {
+		return domain.Data{}, err
+	}
+	defer rows.Close()
+
+	var t time.Time
+	for rows.Next() {
+		if err := rows.Scan(&data.Symbol, &data.ExchangeName, &t, &data.Price); err != nil {
+			return domain.Data{}, err
+		}
+	}
+
+	data.Timestamp = t.UnixMilli()
+
+	return data, nil
+}
+
+// Max by all exchange on period
+func (repo *PostgresDatabase) GetMaxPriceByAllExchangesWithDuration(symbol string, startTime time.Time, duration time.Duration) (domain.Data, error) {
+	data := domain.Data{
+		ExchangeName: "All",
+		Symbol:       symbol,
+	}
+
+	rows, err := repo.Db.Query(`
+SELECT Pair_name, exchange, StoredTime, Max_price
+FROM AggregatedData
+WHERE 
+    Pair_name = $1  AND exchange = 'All' AND StoredTime BETWEEN $2 AND $3
+    AND Max_price = (
+        SELECT MAX(Max_price)
+        FROM AggregatedData
+        WHERE 
+            Pair_name = $1
+            AND exchange = 'All'
+            AND StoredTime BETWEEN $2 AND $3
+    );
+
+	`, symbol, startTime.Add(-duration), startTime)
+	if err != nil {
+		return domain.Data{}, err
+	}
+	defer rows.Close()
+
+	var t time.Time
+	for rows.Next() {
+		if err := rows.Scan(&data.Symbol, &data.ExchangeName, &t, &data.Price); err != nil {
+			return domain.Data{}, err
+		}
+	}
+
+	data.Timestamp = t.UnixMilli()
 	return data, nil
 }

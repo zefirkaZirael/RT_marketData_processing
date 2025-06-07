@@ -64,42 +64,8 @@ GET /prices/average/{exchange}/{symbol} – Get the average price over a period 
 
 GET /prices/average/{exchange}/{symbol}?period={duration} – Get the average price within the last {duration} from a specific exchange
 
-TEST:
-http://localhost:8080/prices/latest/BTCUSDT✅
-http://localhost:8080/prices/latest/Exchange1/BTCUSDT✅
-
-сделать чтобы Exchange правильынй показывал? Надо?
-http://localhost:8080/prices/highest/BTCUSDT✅
-
-данные есть хз праввильно?:
-http://localhost:8080/prices/highest/Exchange1/BTCUSDT✅
-Not work in test:
-http://localhost:8080/prices/highest/BTCUSDT?period=1s 
-http://localhost:8080/prices/highest/Exchange1/BTCUSDT?period=1s
 
 
-http://localhost:8080/prices/lowest/BTCUSDT
-
-not in test:
-http://localhost:8080/prices/lowest/Exchange1/BTCUSDT
-http://localhost:8080/prices/lowest/BTCUSDT?period=1s
-http://localhost:8080/prices/lowest/Exchange1/BTCUSDT?period=1s
-
-http://localhost:8080/prices/average/BTCUSDT
-http://localhost:8080/prices/average/Exchange1/BTCUSDT
-http://localhost:8080/prices/average/Exchange1/BTCUSDT?period=1s
-
-localhost:8080/health
-Check health
-
-localhost:8080/mode/live
-Change test mode to live mode
-
-localhost:8080/prices/latest/Exchange1/BTCUSDT
-latest data from specific exchange
-
-localhost:8080/prices/latest/BTCUSDT
-latest data from all exchanges
 
 
 Domain -> health chek -> ConnMs?
@@ -124,6 +90,17 @@ docker load -i build/exchange_images/exchange3_amd64.tar
 4. go run ./cmd
 
 
+localhost:8080/health
+Check health
+
+localhost:8080/mode/live
+Change test mode to live mode
+
+localhost:8080/prices/latest/Exchange1/BTCUSDT
+latest data from specific exchange
+
+localhost:8080/prices/latest/BTCUSDT
+latest data from all exchanges
 
 BTCUSDT
 DOGEUSDT

@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	datafetcher "marketflow/internal/adapters/dataFetcher"
@@ -37,7 +36,11 @@ func NewDataFetcher(dataSource domain.DataFetcher, DataSaver domain.Database, Ca
 
 var _ (domain.DataModeService) = (*DataModeServiceImp)(nil)
 
+// Mode switch core logic
 func (serv *DataModeServiceImp) SwitchMode(mode string) (int, error) {
+	serv.mu.Lock()
+	defer serv.mu.Unlock()
+
 	// Check if is current datafetcher mode equal to changing mode
 	if _, ok := serv.Datafetcher.(*datafetcher.LiveMode); (ok && mode == "live") || (!ok && mode == "test") {
 		return http.StatusBadRequest, fmt.Errorf("data mode is already switched to %s", mode)
@@ -62,6 +65,7 @@ func (serv *DataModeServiceImp) SwitchMode(mode string) (int, error) {
 	return http.StatusOK, nil
 }
 
+// Goroutines stop logic
 func (serv *DataModeServiceImp) StopListening() {
 	serv.cancel()
 	serv.Datafetcher.Close()
@@ -69,6 +73,7 @@ func (serv *DataModeServiceImp) StopListening() {
 	slog.Info("Listen and save goroutine has been finished...")
 }
 
+// Core logic: handle data retrieval, aggregation, and persistence for exchanges
 func (serv *DataModeServiceImp) ListenAndSave() error {
 	aggregated, rawDataCh, err := serv.Datafetcher.SetupDataFetcher()
 	if err != nil {
@@ -92,7 +97,7 @@ func (serv *DataModeServiceImp) ListenAndSave() error {
 				return
 			case <-t.C:
 				serv.mu.Lock()
-				merged := serv.MergeAggregatedData()
+				merged := MergeAggregatedData(serv.DataBuffer)
 				serv.DB.SaveAggregatedData(merged)
 				serv.Cache.SaveAggregatedData(merged)
 				serv.DataBuffer = nil
@@ -113,7 +118,6 @@ func (serv *DataModeServiceImp) ListenAndSave() error {
 				}
 				serv.mu.Lock()
 				serv.DataBuffer = append(serv.DataBuffer, data)
-				slog.Debug("Received data", "buffer_size", len(serv.DataBuffer)) // Tick log
 				serv.mu.Unlock()
 			}
 		}
@@ -122,6 +126,7 @@ func (serv *DataModeServiceImp) ListenAndSave() error {
 	return nil
 }
 
+// Retrieves the latest data from the channel and stores it in both PostgreSQL and Redis
 func (serv *DataModeServiceImp) SaveLatestData(rawDataCh chan []domain.Data) {
 	for rawData := range rawDataCh {
 		latestData := make(map[string]domain.Data)
@@ -141,8 +146,10 @@ func (serv *DataModeServiceImp) SaveLatestData(rawDataCh chan []domain.Data) {
 				latestData[allKey] = rawData[i]
 			}
 
+			maxLatest := len(domain.Exchanges) * len(domain.Symbols)
+
 			// Break loop if we find all latest prices
-			if len(latestData) == 20 {
+			if len(latestData) == maxLatest {
 				break
 			}
 		}
@@ -158,12 +165,13 @@ func (serv *DataModeServiceImp) SaveLatestData(rawDataCh chan []domain.Data) {
 	}
 }
 
-func (serv *DataModeServiceImp) MergeAggregatedData() map[string]domain.ExchangeData {
+// Merges multiple aggregated exchange data entries into a single aggregated result
+func MergeAggregatedData(DataBuffer []map[string]domain.ExchangeData) map[string]domain.ExchangeData {
 	result := make(map[string]domain.ExchangeData)
 	sums := make(map[string]float64)
 	counts := make(map[string]int)
 
-	for _, dataMap := range serv.DataBuffer {
+	for _, dataMap := range DataBuffer {
 		for key, val := range dataMap {
 			agg, exists := result[key]
 			if !exists {
@@ -194,7 +202,7 @@ func (serv *DataModeServiceImp) MergeAggregatedData() map[string]domain.Exchange
 		}
 	}
 
-	// Считаем среднее
+	// Count average
 	for key, item := range result {
 		if count := counts[key]; count > 0 {
 			item.Average_price = sums[key] / float64(count)
@@ -204,121 +212,21 @@ func (serv *DataModeServiceImp) MergeAggregatedData() map[string]domain.Exchange
 	return result
 }
 
-func (serv *DataModeServiceImp) GetAggregatedData(lastNSeconds int) map[string]domain.ExchangeData {
-	cutoff := time.Now().Add(-time.Duration(lastNSeconds) * time.Second)
-
+// Fetches aggregated market data for a specific exchange and symbol within a time period
+func (serv *DataModeServiceImp) GetAggregatedDataByDuration(exchange, symbol string, duration time.Duration) []map[string]domain.ExchangeData {
 	serv.mu.Lock()
 	defer serv.mu.Unlock()
 
-	var latest map[string]domain.ExchangeData
-	var latestTime time.Time
+	cutoff := time.Now().Add(-duration - 10*time.Second)
 
-	for _, dataMap := range serv.DataBuffer {
+	var latest []map[string]domain.ExchangeData
 
-		for _, data := range dataMap {
-			if data.Timestamp.After(cutoff) {
-				if latest == nil || data.Timestamp.After(latestTime) {
-					latest = dataMap
-					latestTime = data.Timestamp
-				}
-				break
-			}
+	for i := len(serv.DataBuffer) - 1; i >= 0; i-- {
+		m := serv.DataBuffer[i]
+		data, ok := m[exchange+" "+symbol]
+		if ok && !data.Timestamp.Before(cutoff) {
+			latest = append(latest, m)
 		}
 	}
-
 	return latest
-}
-
-// ////////////
-func (serv *DataModeServiceImp) GetHighestPrice(exchange, symbol string, period int) (domain.Data, int, error) {
-	var (
-		latest domain.Data
-		err    error
-	)
-
-	switch exchange {
-	case "Exchange1", "Exchange2", "Exchange3", "All":
-	default:
-		return latest, http.StatusBadRequest, domain.ErrInvalidExchangeVal
-	}
-
-	switch symbol {
-	case domain.BTCUSDT, domain.DOGEUSDT, domain.ETHUSDT, domain.SOLUSDT, domain.TONUSDT:
-	default:
-		return latest, http.StatusBadRequest, domain.ErrInvalidSymbolVal
-	}
-
-	result, err := serv.DB.GetExtremePrice("MAX", exchange, symbol, period)
-	if err != nil {
-		slog.Error("Failed to get highest price from DB", "error", err.Error())
-		return domain.Data{}, http.StatusInternalServerError, err
-	}
-
-	if result.Price == 0 {
-		return domain.Data{}, http.StatusNotFound, errors.New("highest price not found")
-	}
-
-	return result, http.StatusOK, nil
-}
-
-func (serv *DataModeServiceImp) GetLowestPrice(exchange, symbol string, period int) (domain.Data, int, error) {
-	var (
-		latest domain.Data
-		err    error
-	)
-
-	switch exchange {
-	case "Exchange1", "Exchange2", "Exchange3", "All":
-	default:
-		return latest, http.StatusBadRequest, domain.ErrInvalidExchangeVal
-	}
-
-	switch symbol {
-	case domain.BTCUSDT, domain.DOGEUSDT, domain.ETHUSDT, domain.SOLUSDT, domain.TONUSDT:
-	default:
-		return latest, http.StatusBadRequest, domain.ErrInvalidSymbolVal
-	}
-
-	result, err := serv.DB.GetExtremePrice("MIN", exchange, symbol, period)
-	if err != nil {
-		slog.Error("Failed to get lowest price from DB", "error", err.Error())
-		return domain.Data{}, http.StatusInternalServerError, err
-	}
-
-	if result.Price == 0 {
-		return domain.Data{}, http.StatusNotFound, errors.New("lowest price not found")
-	}
-
-	return result, http.StatusOK, nil
-}
-
-func (serv *DataModeServiceImp) GetAveragePrice(exchange, symbol string, period int) (domain.Data, int, error) {
-	var (
-		latest domain.Data
-		err    error
-	)
-
-	switch exchange {
-	case "Exchange1", "Exchange2", "Exchange3", "All":
-	default:
-		return latest, http.StatusBadRequest, domain.ErrInvalidExchangeVal
-	}
-
-	switch symbol {
-	case domain.BTCUSDT, domain.DOGEUSDT, domain.ETHUSDT, domain.SOLUSDT, domain.TONUSDT:
-	default:
-		return latest, http.StatusBadRequest, domain.ErrInvalidSymbolVal
-	}
-
-	result, err := serv.DB.GetAveragePrice(exchange, symbol, period)
-	if err != nil {
-		slog.Error("Failed to get average price from DB", "error", err.Error())
-		return domain.Data{}, http.StatusInternalServerError, err
-	}
-
-	if result.Price == 0 {
-		return domain.Data{}, http.StatusNotFound, errors.New("average price not found")
-	}
-
-	return result, http.StatusOK, nil
 }
