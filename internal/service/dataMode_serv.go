@@ -111,12 +111,21 @@ func (serv *DataModeServiceImp) ListenAndSave() error {
 		for {
 			select {
 			case <-serv.ctx.Done():
-				return
+				for data := range aggregated {
+					serv.mu.Lock()
+					serv.DataBuffer = append(serv.DataBuffer, data)
+					slog.Debug("Received data", "buffer_size", len(serv.DataBuffer)) // Tick log
+					serv.mu.Unlock()
+				}
 			case data, ok := <-aggregated:
 				if !ok {
 					return
 				}
 				serv.mu.Lock()
+				// To not overload buffer
+				// if len(serv.DataBuffer) > 15000 {
+				// 	serv.DataBuffer = serv.DataBuffer[len(serv.DataBuffer)-7500:]
+				// }
 				serv.DataBuffer = append(serv.DataBuffer, data)
 				serv.mu.Unlock()
 			}
@@ -220,13 +229,28 @@ func (serv *DataModeServiceImp) GetAggregatedDataByDuration(exchange, symbol str
 	cutoff := time.Now().Add(-duration - 10*time.Second)
 
 	var latest []map[string]domain.ExchangeData
+	var lastSeen *domain.ExchangeData
 
 	for i := len(serv.DataBuffer) - 1; i >= 0; i-- {
 		m := serv.DataBuffer[i]
 		data, ok := m[exchange+" "+symbol]
-		if ok && !data.Timestamp.Before(cutoff) {
-			latest = append(latest, m)
+		if ok {
+			lastSeen = &data
+			if !data.Timestamp.Before(cutoff) {
+				latest = append(latest, m)
+			}
 		}
 	}
+	if len(latest) == 0 && lastSeen != nil {
+		fmt.Println("DEBUG: nothing matched cutoff =", cutoff)
+		fmt.Println("DEBUG: buffer length =", len(serv.DataBuffer))
+		for i := len(serv.DataBuffer) - 1; i >= 0; i-- {
+			m := serv.DataBuffer[i]
+			if d, ok := m[exchange+" "+symbol]; ok {
+				fmt.Println("BUFFER ENTRY:", d.Exchange, d.Pair_name, d.Timestamp)
+			}
+		}
+	}
+
 	return latest
 }

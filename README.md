@@ -30,4 +30,6 @@ Real-time cryptocurrency market data processing system built with Go, PostgreSQL
 ### Run
 ```
 docker-compose up --build
+or 
+make up
 ```

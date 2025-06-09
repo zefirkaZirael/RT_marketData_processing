@@ -11,12 +11,13 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"time"
 )
 
 func init() {
 	checkFlags()
 
-	if err := envzilla.Loader("build/.env"); err != nil {
+	if err := envzilla.Loader(".env"); err != nil {
 		log.Fatalf("Config file load error: %s", err.Error())
 	}
 }
@@ -34,7 +35,7 @@ func Setup(db domain.Database, cacheMemory domain.CacheMemory, datafetchServ *se
 
 	mux.HandleFunc("GET /prices/{metric}/{symbol}", marketHandler.ProcessMetricQueryByAll)
 	mux.HandleFunc("GET /prices/{metric}/{exchange}/{symbol}", marketHandler.ProcessMetricQueryByExchange)
-
+	fmt.Println(time.Now())
 	return mux
 }
 
@@ -53,7 +54,6 @@ func checkFlags() {
 	if *domain.HelpFlag {
 		printHelp()
 	}
-
 }
 
 // Prints help message

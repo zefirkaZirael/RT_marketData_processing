@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"fmt"
 	"marketflow/internal/domain"
 	"time"
 )
@@ -19,7 +20,6 @@ func (repo *PostgresDatabase) GetLatestDataByExchange(exchange, symbol string) (
 		ORDER BY StoredTime DESC
 		LIMIT 1;
 		`, exchange, symbol)
-
 	if err != nil {
 		return domain.Data{}, err
 	}
@@ -35,6 +35,7 @@ func (repo *PostgresDatabase) GetLatestDataByExchange(exchange, symbol string) (
 
 	return domain.Data{}, nil
 }
+
 func (repo *PostgresDatabase) GetLatestDataByAllExchanges(symbol string) (domain.Data, error) {
 	data := domain.Data{
 		ExchangeName: "All",
@@ -109,7 +110,7 @@ func (repo *PostgresDatabase) GetAveragePriceByAllExchanges(symbol string) (doma
 			return domain.Data{}, err
 		}
 	}
-
+	fmt.Println("Debuger: ", data)
 	return data, nil
 }
 
@@ -318,6 +319,7 @@ WHERE
 		}
 	}
 	data.Timestamp = t.UnixMilli()
+	fmt.Println(data, t)
 
 	return data, nil
 }
@@ -431,5 +433,6 @@ WHERE
 	}
 
 	data.Timestamp = t.UnixMilli()
+
 	return data, nil
 }

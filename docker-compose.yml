@@ -1,0 +1,73 @@
+version: "3.8"
+
+services:
+  redis:
+    image: redis:7
+    container_name: ${CACHE_NAME}
+    env_file:
+      - build/user_friendly.env
+    ports:
+      - "${CACHE_PORT}:6379"
+    command: ["redis-server", "--requirepass", "${CACHE_PASSWORD}"]
+    environment:
+      TZ: Asia/Almaty
+      REDIS_HOST: ${CACHE_HOST}
+      REDIS_PORT: ${CACHE_PORT}
+      REDIS_PASSWORD: ${CACHE_PASSWORD}
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${CACHE_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+
+  db:
+    image: postgres:15
+    container_name: ${DB_NAME}
+    env_file:
+      - build/user_friendly.env
+    ports:
+      - "${DB_PORT}:5432"
+    environment:
+      TZ: Asia/Almaty 
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - ./build/scripts:/docker-entrypoint-initdb.d
+
+  app:
+    build:
+      context: .
+    environment:
+      TZ: Asia/Almaty
+    ports:
+      - "8080:8080"
+    depends_on:
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+
+  exchange1:
+    image: exchange1:latest
+    container_name: ${EXCHANGE1_NAME}
+    ports:
+      - "${EXCHANGE1_PORT}:${EXCHANGE1_PORT}"
+
+  exchange2:
+    image: exchange2:latest
+    container_name: ${EXCHANGE2_NAME}
+    ports:
+      - "${EXCHANGE2_PORT}:${EXCHANGE2_PORT}"
+
+  exchange3:
+    image: exchange3:latest
+    container_name: ${EXCHANGE3_NAME}
+    ports:
+      - "${EXCHANGE3_PORT}:${EXCHANGE3_PORT}"

@@ -26,7 +26,7 @@ func SendMsg(w http.ResponseWriter, code int, msg string) error {
 	return nil
 }
 
-func SendJSON(w http.ResponseWriter, code int, data any) error {
+func SendJSON(w http.ResponseWriter, code int, data interface{}) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 
@@ -46,7 +46,8 @@ func SendMetricData(w http.ResponseWriter, code int, rawdata domain.Data) error 
 		ExchangeName: rawdata.ExchangeName,
 		Symbol:       rawdata.Symbol,
 		Price:        rawdata.Price,
-		Timestamp:    time.Unix(0, rawdata.Timestamp*int64(time.Millisecond)).Format(time.ANSIC),
+		Timestamp: time.Unix(0, rawdata.Timestamp*int64(time.Millisecond)).
+			Format("2006-01-02 15:04:05"),
 	}
 
 	w.Header().Set("Content-Type", "application/json")

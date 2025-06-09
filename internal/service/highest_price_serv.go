@@ -1,7 +1,6 @@
 package service
 
 import (
-	"fmt"
 	"log/slog"
 	"marketflow/internal/domain"
 	"net/http"
@@ -41,12 +40,11 @@ func (serv *DataModeServiceImp) GetHighestPrice(exchange, symbol string) (domain
 
 	serv.mu.Lock()
 	merged := MergeAggregatedData(serv.DataBuffer)
-	fmt.Println(serv.DataBuffer)
 	serv.mu.Unlock()
 
 	key := exchange + " " + symbol
 	if agg, ok := merged[key]; ok {
-		if agg.Max_price != 0 && agg.Max_price > highest.Price {
+		if agg.Max_price > highest.Price {
 			highest.Price = agg.Max_price
 			highest.Timestamp = agg.Timestamp.UnixMilli()
 		}
@@ -93,7 +91,7 @@ func (serv *DataModeServiceImp) GetHighestPriceWithPeriod(exchange, symbol strin
 
 	key := exchange + " " + symbol
 	if agg, ok := merged[key]; ok {
-		if agg.Max_price != 0 && agg.Max_price > highest.Price {
+		if agg.Max_price > highest.Price {
 			highest.Price = agg.Max_price
 			highest.Timestamp = agg.Timestamp.UnixMilli()
 		}
@@ -134,8 +132,8 @@ func (serv *DataModeServiceImp) GetHighestPriceByAllExchangesWithPeriod(symbol s
 
 	key := exchange + " " + symbol
 	if agg, ok := merged[key]; ok {
-		if agg.Max_price != 0 {
-			highest.Price = max(highest.Price, agg.Max_price)
+		if agg.Max_price > highest.Price {
+			highest.Price = agg.Max_price
 			highest.Timestamp = agg.Timestamp.UnixMilli()
 		}
 	} else {
